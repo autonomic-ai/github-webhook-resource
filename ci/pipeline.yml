@@ -1,0 +1,61 @@
+jobs:
+  # sync ensures that Concourse has the latest pipeline.yml changes
+  - name: sync
+    plan:
+      - get: source
+        trigger: true
+
+      - set_pipeline: self
+        file: source/ci/pipeline.yml
+
+  - name: build
+    serial: true
+    plan:
+      - get: source
+        trigger: true
+        passed: [sync]
+
+      - task: build
+        privileged: true
+        config:
+          platform: linux
+          image_resource:
+            type: registry-image
+            source:
+              repository: concourse/oci-build-task
+          inputs:
+            - name: source
+          outputs:
+            - name: image
+          params:
+            CONTEXT: source
+            UNPACK_ROOTFS: true
+          caches:
+            - path: cache
+          run:
+            path: build
+
+      - put: docker
+        params:
+          image: image/image.tar
+          additional_tags: source/.git/ref      
+  
+# resources used by this pipeline
+resources:
+  - name: source
+    type: git
+    icon: github
+    source:
+      uri: git@github.com:autonomic-ai/github-webhook-resource.git
+      branch: master
+      private_key: ((github.private-key))
+
+  - name: docker
+    type: registry-image
+    icon: docker
+    source:
+      repository: au-service/github-webhook-resource
+      tag: latest
+      aws_region: us-west-2
+      aws_access_key_id: ((ecr.aws_access_key_id))
+      aws_secret_access_key: ((ecr.aws_secret_access_key))
